@@ -4,19 +4,21 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 
-// Tüm CORS izinleri
 app.use(cors());
 
-// Render Health Check (Sunucunun ayakta kalması için gerekli)
 app.get('/', (req, res) => {
     res.status(200).send('Yloo Proxy Server Aktif!');
 });
 
-// Proxy Middleware
-app.use('/fetch', (req, res, next) => {
-    const targetUrl = req.query.url;
+// Tüm istekleri ve alt yolları (/search vb.) yakalayan proxy route
+app.use('*', (req, res, next) => {
+    let targetUrl = req.query.url;
 
+    // Eğer parametre yoksa referer veya varsayılan yönlendirmeyi kontrol et
     if (!targetUrl) {
+        if (req.originalUrl === '/' || req.originalUrl.startsWith('/?')) {
+            return res.status(200).send('Proxy Aktif');
+        }
         return res.status(400).send('URL parametresi bulunamadı.');
     }
 
@@ -31,7 +33,6 @@ app.use('/fetch', (req, res, next) => {
                 return parsedUrl.pathname + parsedUrl.search;
             },
             onProxyRes: (proxyRes) => {
-                // Iframe ve CSP engellerini kaldır
                 delete proxyRes.headers['x-frame-options'];
                 delete proxyRes.headers['content-security-policy'];
                 delete proxyRes.headers['frame-options'];
@@ -48,7 +49,6 @@ app.use('/fetch', (req, res, next) => {
     }
 });
 
-// Render dinamik PORT tanımlaması
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server ${PORT} portunda çalışıyor.`);
