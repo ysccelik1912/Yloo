@@ -6,20 +6,25 @@ const app = express();
 
 app.use(cors());
 
+// Son ziyaret edilen ana adresi tutmak için değişken
+let lastTargetDomain = 'https://www.google.com';
+
 app.get('/', (req, res) => {
     res.status(200).send('Yloo Proxy Server Aktif!');
 });
 
-// Tüm istekleri ve alt yolları (/search vb.) yakalayan proxy route
-app.use('*', (req, res, next) => {
+// Proxy route
+app.use('/fetch', (req, res, next) => {
     let targetUrl = req.query.url;
 
-    // Eğer parametre yoksa referer veya varsayılan yönlendirmeyi kontrol et
-    if (!targetUrl) {
-        if (req.originalUrl === '/' || req.originalUrl.startsWith('/?')) {
-            return res.status(200).send('Proxy Aktif');
-        }
-        return res.status(400).send('URL parametresi bulunamadı.');
+    if (targetUrl) {
+        try {
+            const parsed = new URL(targetUrl);
+            lastTargetDomain = parsed.origin;
+        } catch (e) {}
+    } else {
+        // Eğer url parametresi yoksa son bilinen domain üzerinden yolu tamamla
+        targetUrl = lastTargetDomain + req.originalUrl.replace('/fetch', '');
     }
 
     try {
@@ -39,7 +44,7 @@ app.use('*', (req, res, next) => {
                 proxyRes.headers['access-control-allow-origin'] = '*';
             },
             onError: (err, req, res) => {
-                res.status(500).send('Proxy bağlantı hatası: ' + err.message);
+                res.status(500).send('Proxy hatası: ' + err.message);
             }
         });
 
