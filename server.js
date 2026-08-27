@@ -4,24 +4,20 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 
-app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: '*',
-    credentials: true
-}));
+// Tüm CORS izinleri
+app.use(cors());
 
-app.options('*', cors());
-
+// Render Health Check (Sunucunun ayakta kalması için gerekli)
 app.get('/', (req, res) => {
-    res.send('Yloo Proxy Backend Aktif!');
+    res.status(200).send('Yloo Proxy Server Aktif!');
 });
 
+// Proxy Middleware
 app.use('/fetch', (req, res, next) => {
     const targetUrl = req.query.url;
 
     if (!targetUrl) {
-        return res.status(400).send('URL parametresi eksik!');
+        return res.status(400).send('URL parametresi bulunamadı.');
     }
 
     try {
@@ -31,51 +27,29 @@ app.use('/fetch', (req, res, next) => {
             target: parsedUrl.origin,
             changeOrigin: true,
             followRedirects: true,
-            autoRewrite: true,
-            hostRewrite: true,
-            protocolRewrite: 'https',
             pathRewrite: (path, req) => {
                 return parsedUrl.pathname + parsedUrl.search;
             },
-            on: {
-                proxyReq: (proxyReq, req) => {
-                    // Header bilgilerini koru
-                    if (req.headers['content-type']) {
-                        proxyReq.setHeader('Content-Type', req.headers['content-type']);
-                    }
-                    proxyReq.setHeader('User-Agent', req.headers['user-agent'] || 'Mozilla/5.0');
-                },
-                proxyRes: (proxyRes, req, res) => {
-                    // Engelleri kaldır
-                    delete proxyRes.headers['x-frame-options'];
-                    delete proxyRes.headers['content-security-policy'];
-                    delete proxyRes.headers['frame-options'];
-
-                    proxyRes.headers['Access-Control-Allow-Origin'] = '*';
-                    proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
-                    proxyRes.headers['Access-Control-Allow-Headers'] = '*';
-
-                    // Otomatik yönlendirme (301, 302) durumlarında yeni adresi proxy adresiyle sarmala
-                    if (proxyRes.headers['location']) {
-                        let redirectUrl = proxyRes.headers['location'];
-                        if (!redirectUrl.startsWith('http')) {
-                            redirectUrl = new URL(redirectUrl, parsedUrl.origin).href;
-                        }
-                        const host = req.headers.host;
-                        const protocol = req.protocol || 'https';
-                        proxyRes.headers['location'] = `${protocol}://${host}/fetch?url=${encodeURIComponent(redirectUrl)}`;
-                    }
-                }
+            onProxyRes: (proxyRes) => {
+                // Iframe ve CSP engellerini kaldır
+                delete proxyRes.headers['x-frame-options'];
+                delete proxyRes.headers['content-security-policy'];
+                delete proxyRes.headers['frame-options'];
+                proxyRes.headers['access-control-allow-origin'] = '*';
+            },
+            onError: (err, req, res) => {
+                res.status(500).send('Proxy bağlantı hatası: ' + err.message);
             }
         });
 
         return proxy(req, res, next);
     } catch (err) {
-        return res.status(400).send('Geçersiz URL formatı!');
+        return res.status(400).send('Geçersiz URL formatı.');
     }
 });
 
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-    console.log(`Server ${PORT} portunda aktif.`);
+// Render dinamik PORT tanımlaması
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server ${PORT} portunda çalışıyor.`);
 });
