@@ -25,15 +25,35 @@ function proxyUrl(target) {
   return `${PROXY_PREFIX}${encodeURIComponent(target)}`;
 }
 
+function toProxyUrl(value, baseUrl) {
+  const raw = value.trim();
+  if (!raw || raw.startsWith('#') || /^(data|javascript|mailto|tel|blob):/i.test(raw)) return null;
+  try {
+    const absolute = new URL(raw, baseUrl).href;
+    return proxyUrl(absolute);
+  } catch {
+    return null;
+  }
+}
+
 function rewriteHtml(html, baseUrl) {
   return html
     .replace(/<base[^>]*>/gi, '')
-    .replace(/(href|src|action)=(['"])(?!#|data:|javascript:|mailto:|tel:|https?:\/\/|\/\/)([^'"]+)\2/gi, (match, attr, quote, value) => {
-      try { return `${attr}=${quote}${proxyUrl(new URL(value, baseUrl).href)}${quote}`; } catch { return match; }
+    .replace(/\s(href|src|action|poster|formaction)=(['"])([^'"]*)\2/gi, (match, attr, quote, value) => {
+      const rewritten = toProxyUrl(value, baseUrl);
+      return rewritten ? ` ${attr}=${quote}${rewritten}${quote}` : match;
     })
-    .replace(/(href|src|action)=(['"])(https?:\/\/[^'"]+)\2/gi, (match, attr, quote, value) => `${attr}=${quote}${proxyUrl(value)}${quote}`)
-    .replace(/url\((['"]?)(?!data:|https?:\/\/)([^)'"\s]+)\1\)/gi, (match, quote, value) => {
-      try { return `url(${quote}${proxyUrl(new URL(value, baseUrl).href)}${quote})`; } catch { return match; }
+    .replace(/\s(href|src|action|poster|formaction)=([^\s>]+)/gi, (match, attr, value) => {
+      const rewritten = toProxyUrl(value.replace(/[>\\/]$/, ''), baseUrl);
+      return rewritten ? ` ${attr}="${rewritten}"` : match;
+    })
+    .replace(/url\((['"]?)([^)'"\s]+)\1\)/gi, (match, quote, value) => {
+      const rewritten = toProxyUrl(value, baseUrl);
+      return rewritten ? `url(${quote}${rewritten}${quote})` : match;
+    })
+    .replace(/(<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=)([^"']+)/gi, (match, prefix, value) => {
+      const rewritten = toProxyUrl(value, baseUrl);
+      return rewritten ? `${prefix}${rewritten}` : match;
     });
 }
 
