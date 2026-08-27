@@ -4,7 +4,6 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 
-// Tüm kaynaklara, metodlara ve header'lara tam izin ver
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -12,7 +11,6 @@ app.use(cors({
     credentials: true
 }));
 
-// Preflight (OPTIONS) isteklerini anında onayla
 app.options('*', cors());
 
 app.get('/', (req, res) => {
@@ -33,25 +31,40 @@ app.use('/fetch', (req, res, next) => {
             target: parsedUrl.origin,
             changeOrigin: true,
             followRedirects: true,
+            autoRewrite: true,
+            hostRewrite: true,
+            protocolRewrite: 'https',
             pathRewrite: (path, req) => {
                 return parsedUrl.pathname + parsedUrl.search;
             },
             on: {
                 proxyReq: (proxyReq, req) => {
-                    // Login yaparken gönderilen Header ve Content-Type bilgilerini koru
+                    // Header bilgilerini koru
                     if (req.headers['content-type']) {
                         proxyReq.setHeader('Content-Type', req.headers['content-type']);
                     }
+                    proxyReq.setHeader('User-Agent', req.headers['user-agent'] || 'Mozilla/5.0');
                 },
-                proxyRes: (proxyRes) => {
-                    // Iframe ve Güvenlik Engellerini Kaldır
+                proxyRes: (proxyRes, req, res) => {
+                    // Engelleri kaldır
                     delete proxyRes.headers['x-frame-options'];
                     delete proxyRes.headers['content-security-policy'];
                     delete proxyRes.headers['frame-options'];
-                    
+
                     proxyRes.headers['Access-Control-Allow-Origin'] = '*';
                     proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
                     proxyRes.headers['Access-Control-Allow-Headers'] = '*';
+
+                    // Otomatik yönlendirme (301, 302) durumlarında yeni adresi proxy adresiyle sarmala
+                    if (proxyRes.headers['location']) {
+                        let redirectUrl = proxyRes.headers['location'];
+                        if (!redirectUrl.startsWith('http')) {
+                            redirectUrl = new URL(redirectUrl, parsedUrl.origin).href;
+                        }
+                        const host = req.headers.host;
+                        const protocol = req.protocol || 'https';
+                        proxyRes.headers['location'] = `${protocol}://${host}/fetch?url=${encodeURIComponent(redirectUrl)}`;
+                    }
                 }
             }
         });
