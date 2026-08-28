@@ -53,7 +53,19 @@ function rewriteHtml(html, baseUrl) {
     if (window.parent && window.parent !== window) {
       function notifyParent() {
         try {
-          let target = new URL(window.location.href).searchParams.get('url') || window.location.href;
+          const currentUrl = new URL(window.location.href);
+          let target = currentUrl.searchParams.get('url');
+          if (target) {
+            const targetUrl = new URL(target);
+            currentUrl.searchParams.forEach((val, key) => {
+              if (key !== 'url') {
+                targetUrl.searchParams.set(key, val);
+              }
+            });
+            target = targetUrl.href;
+          } else {
+            target = currentUrl.href;
+          }
           window.parent.postMessage({
             type: 'yloo-navigation',
             url: target
@@ -129,6 +141,13 @@ app.get('/fetch', async (req, res) => {
         'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
       },
     });
+
+    // Store target origin in a cookie to resolve future relative requests from SPA routers
+    try {
+      const targetUrl = new URL(upstream.url || target);
+      res.setHeader('Set-Cookie', `last_proxy_origin=${encodeURIComponent(targetUrl.origin)}; Path=/; HttpOnly; SameSite=Lax`);
+    } catch (e) {}
+
     const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
     const body = Buffer.from(await upstream.arrayBuffer());
     res.status(upstream.status).set('content-type', contentType);
@@ -147,22 +166,41 @@ app.all('*', (req, res, next) => {
     return next();
   }
 
+  let targetOrigin = null;
+
+  // Try parsing the Referer header first
   const referer = req.headers.referer;
   if (referer) {
     try {
       const refererUrl = new URL(referer);
       const targetUrlParam = refererUrl.searchParams.get('url');
       if (targetUrlParam) {
-        const originUrl = new URL(targetUrlParam);
-        const targetUrl = new URL(req.originalUrl, originUrl.origin).href;
-        return res.redirect(`/fetch?url=${encodeURIComponent(targetUrl)}`);
+        targetOrigin = new URL(targetUrlParam).origin;
       }
-    } catch (e) {
-      console.error("Referer proxy redirection failed:", e);
+    } catch (e) {}
+  }
+
+  // Fallback to last_proxy_origin cookie if Referer is missing/stripped by browser
+  if (!targetOrigin) {
+    const cookieHeader = req.headers.cookie;
+    if (cookieHeader) {
+      const match = cookieHeader.match(/last_proxy_origin=([^;]+)/);
+      if (match) {
+        targetOrigin = decodeURIComponent(match[1]);
+      }
     }
   }
 
-  res.status(404).send(`Sayfa bulunamadı. Referer bulunamadığı için proxy yönlendirmesi yapılamadı.`);
+  if (targetOrigin) {
+    try {
+      const targetUrl = new URL(req.originalUrl, targetOrigin).href;
+      return res.redirect(`/fetch?url=${encodeURIComponent(targetUrl)}`);
+    } catch (e) {
+      console.error("Cookie/Referer redirection failed:", e);
+    }
+  }
+
+  res.status(404).send(`Sayfa bulunamadı. Referer veya last_proxy_origin tanımlı olmadığı için proxy yönlendirmesi yapılamadı.`);
 });
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Yloo proxy ${PORT} portunda çalışıyor.`));
