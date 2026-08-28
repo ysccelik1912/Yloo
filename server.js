@@ -40,8 +40,9 @@ function toProxyUrl(value, baseUrl) {
 }
 
 function rewriteHtml(html, baseUrl) {
-  // Strip any restricting meta referrer tags
+  // Strip any restricting meta referrer or CSP tags
   let processed = html
+    .replace(/<meta[^>]*http-equiv=["']content-security-policy["'][^>]*>/gi, '')
     .replace(/<meta[^>]*name=["']referrer["'][^>]*>/gi, '')
     .replace(/<meta[^>]*content=["'][^"']*["'][^>]*name=["']referrer["'][^>]*>/gi, '');
 
