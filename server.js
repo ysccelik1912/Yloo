@@ -40,7 +40,44 @@ function toProxyUrl(value, baseUrl) {
 }
 
 function rewriteHtml(html, baseUrl) {
-  return html
+  const injection = `
+<script>
+  (function() {
+    if (window.parent && window.parent !== window) {
+      function notifyParent() {
+        let currentUrl = window.location.href;
+        let match = currentUrl.match(/\\/fetch\\?url=([^&]+)/);
+        let target = match ? decodeURIComponent(match[1]) : currentUrl;
+        window.parent.postMessage({
+          type: 'yloo-navigation',
+          url: target
+        }, '*');
+      }
+      notifyParent();
+
+      const originalPush = history.push;
+      const originalPushState = history.pushState;
+      const originalReplaceState = history.replaceState;
+      history.pushState = function() {
+        originalPushState.apply(this, arguments);
+        setTimeout(notifyParent, 100);
+      };
+      history.replaceState = function() {
+        originalReplaceState.apply(this, arguments);
+        setTimeout(notifyParent, 100);
+      };
+      window.addEventListener('popstate', () => setTimeout(notifyParent, 100));
+    }
+  })();
+</script>
+`;
+
+  let processed = html.replace(/<head>/i, '<head>' + injection);
+  if (processed === html) {
+    processed = injection + html;
+  }
+
+  return processed
     .replace(/<base[^>]*>/gi, '')
     .replace(/\starget=(['"]?)([^'"\s>]+)\1/gi, ' target="_self"')
     .replace(/\s(href|src|action|poster|formaction)=(['"])([^'"]*)\2/gi, (match, attr, quote, value) => {
@@ -87,6 +124,29 @@ app.get('/fetch', async (req, res) => {
   } catch (error) {
     return res.status(502).send(`Proxy hatası: ${error.message}`);
   }
+});
+
+app.all('*', (req, res, next) => {
+  if (req.path === '/' || req.path === '/fetch') {
+    return next();
+  }
+
+  const referer = req.headers.referer;
+  if (referer) {
+    try {
+      const refererUrl = new URL(referer);
+      const targetUrlParam = refererUrl.searchParams.get('url');
+      if (targetUrlParam) {
+        const originUrl = new URL(targetUrlParam);
+        const targetUrl = new URL(req.originalUrl, originUrl.origin).href;
+        return res.redirect(`/fetch?url=${encodeURIComponent(targetUrl)}`);
+      }
+    } catch (e) {
+      console.error("Referer proxy redirection failed:", e);
+    }
+  }
+
+  res.status(404).send(`Sayfa bulunamadı. Referer bulunamadığı için proxy yönlendirmesi yapılamadı.`);
 });
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Yloo proxy ${PORT} portunda çalışıyor.`));
