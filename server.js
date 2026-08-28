@@ -40,22 +40,27 @@ function toProxyUrl(value, baseUrl) {
 }
 
 function rewriteHtml(html, baseUrl) {
+  // Strip any restricting meta referrer tags
+  let processed = html
+    .replace(/<meta[^>]*name=["']referrer["'][^>]*>/gi, '')
+    .replace(/<meta[^>]*content=["'][^"']*["'][^>]*name=["']referrer["'][^>]*>/gi, '');
+
   const injection = `
+<meta name="referrer" content="no-referrer-when-downgrade">
 <script>
   (function() {
     if (window.parent && window.parent !== window) {
       function notifyParent() {
-        let currentUrl = window.location.href;
-        let match = currentUrl.match(/\\/fetch\\?url=([^&]+)/);
-        let target = match ? decodeURIComponent(match[1]) : currentUrl;
-        window.parent.postMessage({
-          type: 'yloo-navigation',
-          url: target
-        }, '*');
+        try {
+          let target = new URL(window.location.href).searchParams.get('url') || window.location.href;
+          window.parent.postMessage({
+            type: 'yloo-navigation',
+            url: target
+          }, '*');
+        } catch (e) {}
       }
       notifyParent();
 
-      const originalPush = history.push;
       const originalPushState = history.pushState;
       const originalReplaceState = history.replaceState;
       history.pushState = function() {
@@ -72,19 +77,29 @@ function rewriteHtml(html, baseUrl) {
 </script>
 `;
 
-  let processed = html.replace(/<head>/i, '<head>' + injection);
-  if (processed === html) {
-    processed = injection + html;
+  let headIndex = processed.search(/<head>/i);
+  if (headIndex !== -1) {
+    processed = processed.substring(0, headIndex + 6) + injection + processed.substring(headIndex + 6);
+  } else {
+    processed = injection + processed;
   }
 
   return processed
     .replace(/<base[^>]*>/gi, '')
     .replace(/\starget=(['"]?)([^'"\s>]+)\1/gi, ' target="_self"')
-    .replace(/\s(href|src|action|poster|formaction)=(['"])([^'"]*)\2/gi, (match, attr, quote, value) => {
+    // Rewrite form actions to submit via proxy fetch and append target URL as a hidden input
+    .replace(/<form\s([^>]*)/gi, (match, attributes) => {
+      let actionMatch = attributes.match(/action=(['"])([^'"]*)\1/i) || attributes.match(/action=([^s>]+)/i);
+      let action = actionMatch ? actionMatch[2] : '';
+      let resolvedAction = action ? new URL(action, baseUrl).href : baseUrl;
+      let cleanAttributes = attributes.replace(/\saction=(['"]?)([^'"\s>]+)\1/i, '');
+      return `<form action="/fetch" ${cleanAttributes}><input type="hidden" name="url" value="${resolvedAction}">`;
+    })
+    .replace(/\s(href|src|poster|formaction)=(['"])([^'"]*)\2/gi, (match, attr, quote, value) => {
       const rewritten = toProxyUrl(value, baseUrl);
       return rewritten ? ` ${attr}=${quote}${rewritten}${quote}` : match;
     })
-    .replace(/\s(href|src|action|poster|formaction)=([^'"\s>][^\s>]*)/gi, (match, attr, value) => {
+    .replace(/\s(href|src|poster|formaction)=([^'"\s>][^\s>]*)/gi, (match, attr, value) => {
       const rewritten = toProxyUrl(value.replace(/[>\\/]$/, ''), baseUrl);
       return rewritten ? ` ${attr}="${rewritten}"` : match;
     })
