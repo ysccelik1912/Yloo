@@ -39,6 +39,7 @@ function toProxyUrl(value, baseUrl) {
 function rewriteHtml(html, baseUrl) {
   return html
     .replace(/<base[^>]*>/gi, '')
+    .replace(/\starget=(['"]?)([^'"\s>]+)\1/gi, ' target="_self"')
     .replace(/\s(href|src|action|poster|formaction)=(['"])([^'"]*)\2/gi, (match, attr, quote, value) => {
       const rewritten = toProxyUrl(value, baseUrl);
       return rewritten ? ` ${attr}=${quote}${rewritten}${quote}` : match;
@@ -88,4 +89,3 @@ module.exports = app;
 // Render start command: node server.js
 // Browser URL format: /fetch?url=https%3A%2F%2Fexample.com
 // All page links, assets and forms are rewritten back through this proxy.
-
