@@ -28,8 +28,11 @@ function proxyUrl(target) {
 function toProxyUrl(value, baseUrl) {
   const raw = value.trim();
   if (!raw || raw.startsWith('#') || /^(data|javascript|mailto|tel|blob):/i.test(raw)) return null;
+  // Prevent double proxying if the URL is already rewritten
+  if (raw.startsWith(PROXY_PREFIX) || raw.includes('/fetch?url=')) return raw;
   try {
     const absolute = new URL(raw, baseUrl).href;
+    if (absolute.includes('/fetch?url=')) return absolute;
     return proxyUrl(absolute);
   } catch {
     return null;
@@ -44,7 +47,7 @@ function rewriteHtml(html, baseUrl) {
       const rewritten = toProxyUrl(value, baseUrl);
       return rewritten ? ` ${attr}=${quote}${rewritten}${quote}` : match;
     })
-    .replace(/\s(href|src|action|poster|formaction)=([^\s>]+)/gi, (match, attr, value) => {
+    .replace(/\s(href|src|action|poster|formaction)=([^'"\s>][^\s>]*)/gi, (match, attr, value) => {
       const rewritten = toProxyUrl(value.replace(/[>\\/]$/, ''), baseUrl);
       return rewritten ? ` ${attr}="${rewritten}"` : match;
     })
